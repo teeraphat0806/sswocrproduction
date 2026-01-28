@@ -84,6 +84,19 @@ CRITICAL RULES:
 9. Assign confidence scores (0.0-1.0) based on how clear the data is
 10. Include warnings array if data is ambiguous or missing
 
+IMPORTANT - COMPANY NAME EXCLUSION:
+DO NOT use these company names as customer name (these are OUR company, not the customer):
+- "บริษัท เอส.เอส.ดับบลิว.สตีลเซ็นเตอร์ จำกัด"
+- "เอส.เอส.ดับบลิว.สตีลเซ็นเตอร์"
+- "S.S.W. Steel Center"
+- "S.S.W. Steelcenter"
+- "SSW Steel Center"
+- "SSW Steelcenter"
+- Any variations of "S.S.W" or "SSW" with "Steel" or "Steelcenter"
+
+If you find these names in the document, they are likely the seller/issuer, NOT the customer.
+Look for OTHER company names to use as customer.name.
+
 SCHEMA:
 """ + self.SCHEMA_DESCRIPTION
         
