@@ -21,17 +21,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Make start script executable
-RUN chmod +x start.sh
-
 # Create temp directory for file processing
 RUN mkdir -p /tmp/uploads && chmod 777 /tmp/uploads
 
 # Expose port
 EXPOSE 8000
 
-# Health check - disabled for Railway
-# Railway has its own health check system
-
-# Run the application using start script
-CMD ["./start.sh"]
+# Run the application directly with Python
+CMD ["python", "-m", "app.main"]
