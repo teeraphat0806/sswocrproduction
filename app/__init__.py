@@ -1,0 +1,2 @@
+# Thai PDF OCR API
+__version__ = "1.0.0"

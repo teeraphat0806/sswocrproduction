@@ -1,0 +1,25 @@
+services:
+  api:
+    build: .
+    container_name: thai-pdf-ocr-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    volumes:
+      # Mount app for development (hot reload)
+      - ./app:/app/app
+      # Temp directory for file uploads
+      - ./tmp:/tmp/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+# For production, you might want to add:
+# - nginx reverse proxy
+# - volume for persistent logs
+# - environment variables from .env file
