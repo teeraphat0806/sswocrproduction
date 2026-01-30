@@ -81,6 +81,7 @@ class OpenRouterClient:
             "openai/gpt-4o-mini",
             "openai/gpt-3.5-turbo",
             "anthropic/claude-3-haiku",
+            "google/gemini-pro"
         ]
         
         headers = {
@@ -120,34 +121,42 @@ class OpenRouterClient:
             logger.debug(f"Request payload: {payload}")
             
             try:
-            with httpx.Client(timeout=timeout) as client:
-                response = client.post(url, json=payload, headers=headers)
-                
-                # Log response status
-                logger.info(f"OpenRouter response status: {response.status_code}")
-                
-                # If error, log response body before raising
-                if response.status_code != 200:
-                    error_body = response.text
-                    logger.error(f"OpenRouter API error response: {error_body}")
-                    try:
-                        error_json = response.json()
-                        logger.error(f"Error JSON: {error_json}")
-                    except:
-                        pass
-                
-                response.raise_for_status()
-                
-                result = response.json()
-                logger.debug(f"OpenRouter response: {result}")
-                
-                # Extract content from OpenAI-compatible response format
-                # Success - log which model was used
-                if attempt_model != model:
-                    logger.warning(f"Primary model '{model}' failed, used fallback: {attempt_model}")
-                logger.info(f"OpenRouter API call successful with {attempt_model}, received {len(content)} characters")
-                return content
+                with httpx.Client(timeout=timeout) as client:
+                    response = client.post(url, json=payload, headers=headers)
                     
+                    # Log response status
+                    logger.info(f"OpenRouter response status: {response.status_code}")
+                    
+                    # If error, log response body before raising
+                    if response.status_code != 200:
+                        error_body = response.text
+                        logger.error(f"OpenRouter API error response: {error_body}")
+                        try:
+                            error_json = response.json()
+                            logger.error(f"Error JSON: {error_json}")
+                        except:
+                            pass
+                    
+                    response.raise_for_status()
+                    
+                    result = response.json()
+                    logger.debug(f"OpenRouter response: {result}")
+                    
+                    # Extract content from OpenAI-compatible response format
+                    if "choices" not in result or len(result["choices"]) == 0:
+                        raise ValueError("No choices in OpenRouter response")
+                    
+                    content = result["choices"][0].get("message", {}).get("content", "")
+                    
+                    if not content:
+                        raise ValueError("Empty content in OpenRouter response")
+                    
+                    # Success - log which model was used
+                    if attempt_model != model:
+                        logger.warning(f"Primary model '{model}' failed, used fallback: {attempt_model}")
+                    logger.info(f"OpenRouter API call successful with {attempt_model}, received {len(content)} characters")
+                    return content
+                        
             except httpx.HTTPStatusError as e:
                 error_msg = f"HTTP {e.response.status_code}"
                 try:
@@ -193,12 +202,4 @@ class OpenRouterClient:
         if last_error:
             raise last_error
         else:
-            raise ValueError("All OpenRouter models failed")equest=e.request,
-                response=e.response
-            )
-        except httpx.TimeoutException:
-            logger.error(f"OpenRouter API timeout after {timeout}s")
-            raise
-        except Exception as e:
-            logger.error(f"OpenRouter API error: {str(e)}")
-            raise
+            raise ValueError("All OpenRouter models failed")
