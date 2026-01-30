@@ -98,15 +98,33 @@ class OpenRouterClient:
         
         url = f"{self.base_url}/chat/completions"
         
-        logger.info(f"Calling OpenRouter API with model: {model}")
+        # Log request details (mask API key for security)
+        masked_key = self.api_key[:10] + "..." + self.api_key[-4:] if len(self.api_key) > 14 else "***"
+        logger.info(f"Calling OpenRouter API: {url}")
+        logger.info(f"Model: {model}, API Key: {masked_key}")
         logger.debug(f"Request payload: {payload}")
         
         try:
             with httpx.Client(timeout=timeout) as client:
                 response = client.post(url, json=payload, headers=headers)
+                
+                # Log response status
+                logger.info(f"OpenRouter response status: {response.status_code}")
+                
+                # If error, log response body before raising
+                if response.status_code != 200:
+                    error_body = response.text
+                    logger.error(f"OpenRouter API error response: {error_body}")
+                    try:
+                        error_json = response.json()
+                        logger.error(f"Error JSON: {error_json}")
+                    except:
+                        pass
+                
                 response.raise_for_status()
                 
                 result = response.json()
+                logger.debug(f"OpenRouter response: {result}")
                 
                 # Extract content from OpenAI-compatible response format
                 if "choices" not in result or len(result["choices"]) == 0:
@@ -121,8 +139,26 @@ class OpenRouterClient:
                 return content
                 
         except httpx.HTTPStatusError as e:
-            logger.error(f"OpenRouter API HTTP error: {e.response.status_code} - {e.response.text}")
-            raise
+            error_msg = f"HTTP {e.response.status_code}"
+            try:
+                error_json = e.response.json()
+                if "error" in error_json:
+                    error_detail = error_json["error"]
+                    if isinstance(error_detail, dict):
+                        error_msg = f"{error_msg}: {error_detail.get('message', e.response.text)}"
+                    else:
+                        error_msg = f"{error_msg}: {error_detail}"
+                else:
+                    error_msg = f"{error_msg}: {e.response.text}"
+            except:
+                error_msg = f"{error_msg}: {e.response.text}"
+            
+            logger.error(f"OpenRouter API HTTP error: {error_msg}")
+            raise httpx.HTTPStatusError(
+                message=error_msg,
+                request=e.request,
+                response=e.response
+            )
         except httpx.TimeoutException:
             logger.error(f"OpenRouter API timeout after {timeout}s")
             raise

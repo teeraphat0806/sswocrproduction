@@ -147,10 +147,13 @@ async def structure_text(request: StructureRequest, token: str = Depends(verify_
                 temperature=0.0  # Deterministic output
             )
         except httpx.HTTPStatusError as e:
-            logger.error(f"OpenRouter API error: {e}")
+            error_detail = str(e)
+            if hasattr(e, 'message'):
+                error_detail = e.message
+            logger.error(f"OpenRouter API error: {error_detail}")
             raise HTTPException(
                 status_code=502,
-                detail=f"LLM service error: {e.response.status_code}"
+                detail=f"LLM service error: {error_detail}"
             )
         except httpx.TimeoutException:
             logger.error("OpenRouter API timeout")
@@ -283,10 +286,13 @@ async def pdf_to_structured_json(
                 temperature=0.0
             )
         except httpx.HTTPStatusError as e:
-            logger.error(f"OpenRouter API error: {e}")
+            error_detail = str(e)
+            if hasattr(e, 'message'):
+                error_detail = e.message
+            logger.error(f"OpenRouter API error: {error_detail}")
             raise HTTPException(
                 status_code=502,
-                detail=f"LLM service error: {e.response.status_code}"
+                detail=f"LLM service error: {error_detail}"
             )
         except httpx.TimeoutException:
             logger.error("OpenRouter API timeout")
