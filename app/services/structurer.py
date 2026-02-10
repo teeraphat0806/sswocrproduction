@@ -78,9 +78,14 @@ CRITICAL RULES:
 3. For missing fields: use null for optional fields, empty string "" for strings if unclear, 0 for numbers if unclear, [] for empty arrays
 4. All dates must be in ISO format: YYYY-MM-DD
 5. Numbers should be extracted as numbers, not strings
-6. For steel items, look for patterns like: "thickness x width x length" or "หนา x กว้าง x ยาว"
+6. For steel items, look for dimension patterns:
+   - "thickness x width x length" or "หนา x กว้าง x ยาว" (3 dimensions) → shape is "square"
+   - "length x thickness" or "ยาว x หนา" (2 dimensions only) → shape is "line"
+   - Look for Ø symbol which indicates cylindrical/line shape → shape is "line"
 7. Steel codes are typically like: SS400, RB12, H-Beam, etc.
-8. Shape is typically "square" for sheet/plate or "line" for bars/beams
+8. Shape classification rules:
+   - "square" = sheet/plate with 3 dimensions (thickness, width, length)
+   - "line" = bars/beams/rods with 2 dimensions OR has Ø symbol
 9. Assign confidence scores (0.0-1.0) based on how clear the data is
 10. Include warnings array if data is ambiguous or missing
 
