@@ -81,7 +81,8 @@ class OpenRouterClient:
             "openai/gpt-4o-mini",
             "openai/gpt-3.5-turbo",
             "anthropic/claude-3-haiku",
-            "google/gemini-pro"
+            "google/gemini-pro",
+            "deepseek/deepseek-chat-v3.1"
         ]
         
         headers = {
