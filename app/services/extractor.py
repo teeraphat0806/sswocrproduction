@@ -24,6 +24,7 @@ class PDFExtractor:
         self.min_text_length = 10  # Minimum text length to consider valid
         self.thai_ratio_threshold = 0.1  # Minimum ratio of Thai characters
     
+    # ฟังก์ชันหลักที่เรียกใช้ในการสกัดข้อความจาก PDF โดยจะพยายามใช้การสกัดข้อความแบบปกติก่อน ถ้าไม่สำเร็จหรือข้อความไม่ดีพอ จะใช้ OCR แทน
     def extract(self, pdf_path: str) -> Dict:
         """
         Extract text from PDF using text extraction or OCR.
@@ -62,7 +63,7 @@ class PDFExtractor:
             "page_count": ocr_result["page_count"],
             "method": "ocr"
         }
-    
+    # pypdf → อ่านข้อความจาก PDF โดยตรง ซึ่งจะได้ผลดีสำหรับ PDF ที่มีข้อความจริง (ไม่ใช่สแกน) และรองรับภาษาไทยและภาษาอังกฤษ
     def _extract_text(self, pdf_path: str) -> Dict:
         """
         Extract text using pypdf.
@@ -98,7 +99,8 @@ class PDFExtractor:
                 "pages": [],
                 "page_count": 0
             }
-    
+        
+    #pytesseract → อ่านข้อความจากรูปภาพ โดยใช้ Tesseract OCR ซึ่งรองรับภาษาไทยและภาษาอังกฤษ
     def _extract_with_ocr(self, pdf_path: str) -> Dict:
         """
         Extract text using OCR with Tesseract (Thai language).
@@ -162,7 +164,8 @@ class PDFExtractor:
         except Exception as e:
             logger.error(f"OCR extraction failed: {e}")
             raise
-    
+
+    # ใช้ตรวจว่า:“text ที่ได้จาก pypdf ดีพอหรือยัง” ถ้าไม่ดีพอ (เช่น มีแต่ตัวอักษรภาษาอังกฤษ หรือมีข้อความน้อยเกินไป) ก็จะไปใช้ OCR แทน
     def _is_valid_extraction(self, text: str) -> bool:
         """
         Check if extracted text is valid Thai text.

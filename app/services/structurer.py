@@ -6,14 +6,14 @@ from app.models.po_schemas import OCRPOResult
 
 logger = logging.getLogger(__name__)
 
-
+# หน้าที่ของ TextStructurer คือการสร้าง prompt สำหรับ LLM และตรวจสอบความถูกต้องของข้อมูลที่ได้จาก LLM โดยจะมีการกำหนด schema ที่คาดหวังและกฎเกณฑ์ต่างๆ เพื่อให้แน่ใจว่าข้อมูลที่ได้มีความสอดคล้องกับความต้องการและสามารถนำไปใช้งานต่อได้อย่างถูกต้อง โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการแปลงข้อมูลจาก LLM เป็น JSON และการตรวจสอบความถูกต้องของข้อมูลตาม schema ที่กำหนดไว้
 class TextStructurer:
     """
     Service for building prompts and validating structured output.
     Responsible ONLY for prompt engineering and schema validation.
     """
     
-    # JSON schema description for the LLM
+    # กำหนด schema ที่คาดหวังสำหรับข้อมูลที่ได้จาก LLM โดยจะมีการอธิบายรายละเอียดของแต่ละฟิลด์ใน schema เพื่อให้แน่ใจว่าข้อมูลที่ได้มีความสอดคล้องกับความต้องการและสามารถนำไปใช้งานต่อได้อย่างถูกต้อง โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการแปลงข้อมูลจาก LLM เป็น JSON และการตรวจสอบความถูกต้องของข้อมูลตาม schema ที่กำหนดไว้
     SCHEMA_DESCRIPTION = """
 {
   "header": {
@@ -57,7 +57,7 @@ class TextStructurer:
   }
 }
 """
-    
+    # ฟังก์ชันหลักที่ใช้ในการสร้าง prompt สำหรับ LLM โดยจะมีการกำหนดกฎเกณฑ์และ schema ที่คาดหวังเพื่อให้แน่ใจว่าข้อมูลที่ได้จาก LLM มีความสอดคล้องกับความต้องการและสามารถนำไปใช้งานต่อได้อย่างถูกต้อง โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการแปลงข้อมูลจาก LLM เป็น JSON และการตรวจสอบความถูกต้องของข้อมูลตาม schema ที่กำหนดไว้
     def build_prompt(self, text: str) -> list:
         """
         Build chat messages for OpenRouter to extract structured data from text.
@@ -119,7 +119,7 @@ Remember: Return ONLY the JSON object, no other text."""
         ]
         
         return messages
-    
+# ฟังก์ชันที่ใช้ในการแปลงข้อมูลจาก LLM เป็น JSON และตรวจสอบความถูกต้องของข้อมูลตาม schema ที่กำหนดไว้ โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการแปลงข้อมูลจาก LLM เป็น JSON และการตรวจสอบความถูกต้องของข้อมูลตาม schema ที่กำหนดไว้ เพื่อให้แน่ใจว่าข้อมูลที่ได้มีความสอดคล้องกับความต้องการและสามารถนำไปใช้งานต่อได้อย่างถูกต้อง   
     def parse_and_validate(self, json_text: str, include_raw_text: bool = True) -> Dict[str, Any]:
         """
         Parse JSON string and validate against Pydantic schema.
@@ -135,10 +135,10 @@ Remember: Return ONLY the JSON object, no other text."""
             ValueError: If JSON is invalid or doesn't parse
             ValidationError: If JSON doesn't match schema
         """
-        # Clean up common LLM mistakes
+        # ทำความสะอาดข้อความ JSON ที่ได้รับจาก LLM โดยจะมีการลบช่องว่างส่วนเกินและตรวจสอบว่าข้อความที่ได้รับไม่ว่างเปล่า และถ้าข้อความที่ได้รับเริ่มต้นด้วย markdown code block จะมีการลบ markdown code block ออกเพื่อให้เหลือเฉพาะ JSON ที่ต้องการแปลง และถ้าข้อความที่ได้รับไม่สามารถแปลงเป็น JSON ได้ จะมีการแจ้งเตือนผ่านการล็อกและส่งกลับข้อผิดพลาดที่เกิดขึ้นในการแปลง JSON เพื่อให้สามารถดีบักได้ง่ายขึ้น
         cleaned_text = json_text.strip()
         
-        # Remove markdown code blocks if present
+        # ลบช่องว่างส่วนเกินและตรวจสอบว่าข้อความที่ได้รับไม่ว่างเปล่า
         if cleaned_text.startswith("```"):
             # Remove ```json or ``` prefix
             lines = cleaned_text.split("\n")
@@ -150,7 +150,7 @@ Remember: Return ONLY the JSON object, no other text."""
         
         cleaned_text = cleaned_text.strip()
         
-        # Parse JSON
+        # ตรวจ json_text ที่ได้รับไม่ว่างเปล่า
         try:
             data = json.loads(cleaned_text)
         except json.JSONDecodeError as e:
@@ -159,12 +159,12 @@ Remember: Return ONLY the JSON object, no other text."""
             snippet = cleaned_text[:300] + ("..." if len(cleaned_text) > 300 else "")
             raise ValueError(f"Invalid JSON from model. Error: {str(e)}. Snippet: {snippet}")
         
-        # Validate against Pydantic schema
+        # ตรวจสอบความถูกต้องของข้อมูลตาม schema ที่กำหนดไว้ โดยจะมีการใช้ Pydantic ในการตรวจสอบความถูกต้องของข้อมูลและแปลงข้อมูลเป็น dict ที่สามารถนำไปใช้งานต่อได้อย่างถูกต้อง และถ้าข้อมูลที่ได้รับไม่ตรงกับ schema ที่กำหนดไว้ จะมีการแจ้งเตือนผ่านการล็อกและส่งกลับข้อผิดพลาดที่เกิดขึ้นในการตรวจสอบความถูกต้องของข้อมูลเพื่อให้สามารถดีบักได้ง่ายขึ้น และถ้าข้อมูลที่ได้รับมีความสอดคล้องกับ schema ที่กำหนดไว้ จะมีการส่งกลับข้อมูลในรูปแบบ dict ที่สามารถนำไปใช้งานต่อได้อย่างถูกต้อง และถ้า include_raw_text เป็น False จะมีการลบ rawText ออกจากผลลัพธ์เพื่อให้ขนาดของผลลัพธ์ลดลง
         try:
             validated = OCRPOResult(**data)
             result = validated.model_dump()
             
-            # Optionally remove rawText to reduce response size
+            # ถ้า include_raw_text เป็น False จะมีการลบ rawText ออกจากผลลัพธ์เพื่อให้ขนาดของผลลัพธ์ลดลง
             if not include_raw_text and result.get("meta", {}).get("rawText"):
                 result["meta"]["rawText"] = None
             
@@ -174,6 +174,7 @@ Remember: Return ONLY the JSON object, no other text."""
             logger.error(f"Schema validation failed: {e}")
             raise
     
+    # ฟังก์ชันหลักที่ใช้ในการสร้าง prompt สำหรับ LLM และตรวจสอบความถูกต้องของข้อมูลที่ได้จาก LLM โดยจะมีการกำหนดกฎเกณฑ์และ schema ที่คาดหวังเพื่อให้แน่ใจว่าข้อมูลที่ได้จาก LLM มีความสอดคล้องกับความต้องการและสามารถนำไปใช้งานต่อได้อย่างถูกต้อง โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการแปลงข้อมูลจาก LLM เป็น JSON และการตรวจสอบความถูกต้องของข้อมูลตาม schema ที่กำหนดไว้ เพื่อให้แน่ใจว่าข้อมูลที่ได้มีความสอดคล้องกับความต้องการและสามารถนำไปใช้งานต่อได้อย่างถูกต้อง
     def structure_text(self, text: str, llm_callable, include_raw_text: bool = True) -> Dict[str, Any]:
         """
         High-level method to structure text using an LLM callable.

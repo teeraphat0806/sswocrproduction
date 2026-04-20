@@ -5,20 +5,20 @@ from typing import Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from project root
-# Find the .env file by going up from this file's location
+# โหลดค่าคอนฟิกจาก .env ไฟล์ที่อยู่ในโฟลเดอร์หลักของโปรเจค (ขึ้นไป 3 ระดับจากไฟล์นี้) เพื่อให้สามารถใช้ตัวแปรสภาพแวดล้อมในการตั้งค่า OpenRouterClient ได้อย่างง่ายดาย
+# หากไม่มี .env ไฟล์ หรือค่าที่จำเป็นไม่ถูกตั้งค่า จะมีการแจ้งเตือนผ่าน ValueError ในการสร้างอินสแตนซ์ของ OpenRouterClient และจะมีการล็อกข้อมูลที่เกี่ยวข้องเพื่อช่วยในการดีบักและตรวจสอบปัญหาในการเชื่อมต่อกับ OpenRouter API
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 logger = logging.getLogger(__name__)
 
-
+# Client สำหรับเรียก OpenRouter API โดยเฉพาะ มีหน้าที่รับผิดชอบในการทำ HTTP requests ไปยัง OpenRouter เท่านั้น 
 class OpenRouterClient:
     """
     Client for calling OpenRouter.ai API.
     Responsible ONLY for making HTTP requests to OpenRouter.
     """
-    
+    # การตั้งค่าเริ่มต้นจะถูกดึงมาจาก environment variables หรือสามารถส่งผ่านพารามิเตอร์ได้เมื่อสร้างอินสแตนซ์ของคลาสนี้ โดยมีการจัดการ fallback models ในกรณีที่โมเดลหลักไม่สามารถใช้งานได้ และมีการล็อกข้อมูลที่เกี่ยวข้องกับการเรียก API เพื่อช่วยในการดีบักและตรวจสอบปัญหาในการเชื่อมต่อกับ OpenRouter API
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -49,6 +49,7 @@ class OpenRouterClient:
                 "Set OPENROUTER_API_KEY environment variable or pass api_key parameter."
             )
     
+    # ฟังก์ชันหลักในการเรียก OpenRouter API โดยจะมีการจัดการ fallback models ในกรณีที่โมเดลหลักไม่สามารถใช้งานได้ และมีการล็อกข้อมูลที่เกี่ยวข้องกับการเรียก API เพื่อช่วยในการดีบักและตรวจสอบปัญหาในการเชื่อมต่อกับ OpenRouter API
     def call_openrouter(
         self,
         messages: list,
@@ -90,38 +91,39 @@ class OpenRouterClient:
             "Content-Type": "application/json"
         }
         
-        # Add optional headers if configured
+        # เพิ่ม HTTP headers สำหรับ referer และ app title ถ้ามีการตั้งค่าไว้ เพื่อให้สามารถส่งข้อมูลเหล่านี้ไปยัง OpenRouter API ได้ 
         if self.http_referer:
             headers["HTTP-Referer"] = self.http_referer
         if self.app_title:
             headers["X-Title"] = self.app_title
-        
+        # รายละเอียดของ payload ที่จะส่งไปยัง OpenRouter API
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature
         }
-        
+        # ถ้ามีการตั้งค่า max_tokens จะเพิ่มเข้าไปใน payload เพื่อจำกัดจำนวนโทเค็นในคำตอบจากโมเดล
         if max_tokens:
             payload["max_tokens"] = max_tokens
         
         url = f"{self.base_url}/chat/completions"
         
-        # Try primary model first, then fallbacks if needed
+        # ลองเรียก API ด้วยโมเดลหลักก่อน ถ้าเกิดข้อผิดพลาดที่บ่งชี้ว่าโมเดลไม่สามารถใช้งานได้ (เช่น 404 หรือข้อความแสดงว่า provider ไม่พร้อม) จะลองใช้โมเดลถัดไปใน fallback list จนกว่าจะสำเร็จหรือหมดตัวเลือก 
         models_to_try = [model] + [m for m in fallback_models if m != model]
         last_error = None
         
         for attempt_model in models_to_try:
-            # Update payload with current model
+            # อัปเดตโมเดลใน payload สำหรับแต่ละการลองเรียก API เพื่อให้แน่ใจว่าเรากำลังทดสอบโมเดลที่ถูกต้องในแต่ละรอบของการลอง
             payload["model"] = attempt_model
             
-            # Log request details (mask API key for security)
+            # การล็อกข้อมูลที่เกี่ยวข้องกับการเรียก API เช่น URL, โมเดลที่กำลังพยายามใช้, และ API key ที่ถูกมาสก์เพื่อความปลอดภัย เพื่อช่วยในการดีบักและตรวจสอบปัญหาในการเชื่อมต่อกับ OpenRouter API
             masked_key = self.api_key[:10] + "..." + self.api_key[-4:] if len(self.api_key) > 14 else "***"
             logger.info(f"Calling OpenRouter API: {url}")
             logger.info(f"Attempting model: {attempt_model}, API Key: {masked_key}")
             logger.debug(f"Request payload: {payload}")
             
             try:
+                # การใช้ httpx.Client เพื่อทำการส่ง HTTP POST request ไปยัง OpenRouter API ด้วย payload และ headers ที่เตรียมไว้ และมีการจัดการ timeout เพื่อป้องกันการรอคอยที่ยาวนานเกินไปในกรณีที่ API ไม่ตอบสนอง
                 with httpx.Client(timeout=timeout) as client:
                     response = client.post(url, json=payload, headers=headers)
                     
@@ -137,27 +139,28 @@ class OpenRouterClient:
                             logger.error(f"Error JSON: {error_json}")
                         except:
                             pass
-                    
+                    # ตรวจสอบสถานะของการตอบกลับจาก OpenRouter API และถ้าไม่ใช่ 200 OK จะมีการล็อกข้อมูลที่เกี่ยวข้องกับข้อผิดพลาดและพยายามใช้โมเดลถัดไปใน fallback list จนกว่าจะสำเร็จหรือหมดตัวเลือก
                     response.raise_for_status()
                     
                     result = response.json()
                     logger.debug(f"OpenRouter response: {result}")
                     
-                    # Extract content from OpenAI-compatible response format
+                    # ตรวจสอบรูปแบบของการตอบกลับจาก OpenRouter API ว่ามีข้อมูลที่คาดหวังหรือไม่ เช่น การมี "choices" และ "content" ในการตอบกลับ ถ้าไม่มีจะมีการแจ้งเตือนผ่าน ValueError และถ้ามีจะทำการดึงข้อมูลที่ต้องการออกมาและส่งกลับไปยังผู้เรียก
                     if "choices" not in result or len(result["choices"]) == 0:
                         raise ValueError("No choices in OpenRouter response")
                     
                     content = result["choices"][0].get("message", {}).get("content", "")
                     
+                    # ตรวจสอบว่าข้อมูลที่ได้จาก OpenRouter API ไม่ว่างเปล่า ถ้าเป็นเช่นนั้นจะมีการแจ้งเตือนผ่าน ValueError และถ้าไม่ว่างเปล่าจะทำการส่งกลับไปยังผู้เรียก
                     if not content:
                         raise ValueError("Empty content in OpenRouter response")
                     
-                    # Success - log which model was used
+                    # การล็อกข้อมูลที่เกี่ยวข้องกับการเรียก API เช่น โมเดลที่ใช้ในการตอบกลับและจำนวนตัวอักษรที่ได้รับจาก OpenRouter API เพื่อช่วยในการดีบักและตรวจสอบปัญหาในการเชื่อมต่อกับ OpenRouter API และถ้าโมเดลที่สำเร็จไม่ใช่โมเดลหลักที่ตั้งไว้ จะมีการแจ้งเตือนผ่านการล็อกเพื่อให้ทราบว่าโมเดลหลักไม่สามารถใช้งานได้และมีการใช้โมเดล fallback แทน
                     if attempt_model != model:
                         logger.warning(f"Primary model '{model}' failed, used fallback: {attempt_model}")
                     logger.info(f"OpenRouter API call successful with {attempt_model}, received {len(content)} characters")
                     return content
-                        
+            # การจัดการข้อผิดพลาดที่เกิดขึ้นระหว่างการเรียก API เช่น HTTP errors, timeouts, หรือข้อผิดพลาดอื่นๆ โดยจะมีการล็อกข้อมูลที่เกี่ยวข้องกับข้อผิดพลาดและพยายามใช้โมเดลถัดไปใน fallback list จนกว่าจะสำเร็จหรือหมดตัวเลือก และถ้าทุกโมเดลใน fallback list ล้มเหลว จะมีการแจ้งเตือนผ่านการล็อกและส่งกลับข้อผิดพลาดสุดท้ายที่เกิดขึ้น            
             except httpx.HTTPStatusError as e:
                 error_msg = f"HTTP {e.response.status_code}"
                 try:
@@ -180,12 +183,12 @@ class OpenRouterClient:
                     response=e.response
                 )
                 
-                # If 404 or provider error, try next model
+                # ตรวจสอบว่าข้อผิดพลาดที่เกิดขึ้นเป็นข้อผิดพลาดที่บ่งชี้ว่าโมเดลไม่สามารถใช้งานได้ (เช่น 404 หรือข้อความแสดงว่า provider ไม่พร้อม) ถ้าเป็นเช่นนั้นจะมีการล็อกข้อมูลที่เกี่ยวข้องและพยายามใช้โมเดลถัดไปใน fallback list จนกว่าจะสำเร็จหรือหมดตัวเลือก แต่ถ้าเป็นข้อผิดพลาดอื่นๆ จะไม่พยายามใช้โมเดลถัดไปและจะส่งกลับข้อผิดพลาดทันที
                 if e.response.status_code == 404 or "provider" in error_msg.lower():
                     logger.warning(f"Model {attempt_model} not available, trying next fallback...")
                     continue
                 else:
-                    # For other errors, don't fallback
+                    # ข้อผิดพลาดที่ไม่เกี่ยวข้องกับโมเดลไม่พร้อม เช่น ปัญหาในการเชื่อมต่อหรือข้อผิดพลาดอื่นๆ จะไม่พยายามใช้โมเดลถัดไปและจะส่งกลับข้อผิดพลาดทันที
                     raise last_error
                     
             except httpx.TimeoutException as e:
@@ -198,7 +201,7 @@ class OpenRouterClient:
                 last_error = e
                 continue
         
-        # If we get here, all models failed
+        # ถ้าทุกโมเดลใน fallback list ล้มเหลว จะมีการแจ้งเตือนผ่านการล็อกและส่งกลับข้อผิดพลาดสุดท้ายที่เกิดขึ้น
         logger.error(f"All models failed. Last error: {last_error}")
         if last_error:
             raise last_error

@@ -4,19 +4,19 @@ from app.api.routes import router
 import logging
 import os
 
-# Load environment variables
+# โหลด environment variables จาก .env ไฟล์
 from dotenv import load_dotenv
 load_dotenv()
 
-# Configure logging
+# ตั้งค่าระดับ logging จาก environment variable หรือใช้ค่าเริ่มต้นเป็น INFO
 log_level = os.getenv("LOG_LEVEL", "INFO")
 logging.basicConfig(
     level=getattr(logging, log_level),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-
+# สร้าง logger สำหรับโมดูลนี้
 logger = logging.getLogger(__name__)
-
+# สร้าง FastAPI app และตั้งค่าชื่อ, คำอธิบาย, และเวอร์ชันของ API
 app = FastAPI(
     title="Thai PDF OCR API",
     description="Extract Thai text from PDF files using text extraction and OCR fallback, "
@@ -24,7 +24,7 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# CORS configuration - customize for production
+# ตั้งค่า CORS middleware โดยดึง allowed origins จาก environment variable และอนุญาตให้ใช้ credentials, methods, และ headers ที่จำเป็นสำหรับการทำงานของ API
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -34,7 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# รวม router จากโมดูล api.routes เพื่อให้สามารถเข้าถึง endpoints ที่กำหนดไว้ใน router ได้ผ่าน API นี้
 app.include_router(router)
 
 
@@ -61,7 +61,7 @@ async def health():
         }
     }
 
-
+# จุดเริ่มต้นของแอปพลิเคชัน โดยจะมีการตั้งค่าระดับ logging จาก environment variable และสร้าง FastAPI app พร้อมกับตั้งค่าชื่อ, คำอธิบาย, และเวอร์ชันของ API นอกจากนี้ยังมีการตั้งค่า CORS middleware เพื่ออนุญาตให้เข้าถึง API จาก origins ที่กำหนดไว้ใน environment variable และรวม router จากโมดูล api.routes เพื่อให้สามารถเข้าถึง endpoints ที่กำหนดไว้ใน router ได้ผ่าน API นี้ โดยมี endpoints สำหรับ health check เพื่อให้สามารถตรวจสอบสถานะของ API ได้อย่างง่ายดาย
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

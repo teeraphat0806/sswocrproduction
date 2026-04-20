@@ -20,8 +20,8 @@ router = APIRouter()
 
 # Configuration
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-
-
+# ไฟล์นี้คือ “API Layer (FastAPI Router)” ของระบบทั้งหมดคือ “ประตูเข้า” ของระบบ OCR + LLM ทั้งก้อน
+# ดึง text จาก PDF
 @router.post(
     "/extract/pdf",
     response_model=ExtractionResponse,
@@ -36,6 +36,7 @@ MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
                 "Uses text extraction first, falls back to OCR for scanned PDFs. "
                 "Requires X-API-Token header for authentication."
 )
+# ใช้ “แค่ OCR / text extraction”
 async def extract_pdf(
     file: UploadFile = File(..., description="PDF file to extract text from"),
     token: str = Depends(verify_token)
@@ -51,36 +52,36 @@ async def extract_pdf(
     temp_path = None
     
     try:
-        # Read file content
+        # ขั้นที่ 1 อ่านและตรวจสอบไฟล์ที่อัปโหลดเข้ามา โดยจะมีการตรวจสอบขนาดของไฟล์เพื่อให้แน่ใจว่าไม่เกินขนาดที่กำหนดไว้ และจะมีการตรวจสอบว่าไฟล์ที่อัปโหลดเป็น PDF หรือไม่ โดยใช้ฟังก์ชัน validate_pdf_file ที่ได้กำหนดไว้ใน utils/files.py ซึ่งจะตรวจสอบทั้งนามสกุลของไฟล์และประเภทของเนื้อหา (content type) เพื่อให้แน่ใจว่าไฟล์ที่ได้รับเป็น PDF ที่ถูกต้องและปลอดภัยสำหรับการประมวลผลต่อไป
         content = await file.read()
         file_size = len(content)
         
-        # Validate file size
+        # ตรวจสอบขนาดไฟล์
         if file_size > MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=413,
                 detail=f"File size ({file_size / 1024 / 1024:.2f} MB) exceeds maximum allowed size (20 MB)"
             )
         
-        # Validate file
+        # ตรวจสอบว่าเป็น PDF 
         validate_pdf_file(file.filename, file.content_type)
         
-        # Save to temp file
+        # ขั้นที่ 2 บันทึกไฟล์ชั่วคราวในระบบเพื่อนำไปสกัดข้อความจาก PDF
         temp_path = save_temp_file(content, suffix=".pdf")
         logger.info(f"Processing PDF: {file.filename} ({file_size / 1024:.2f} KB)")
         
-        # Extract text
+        # ขั้นที่ 3 สกัดข้อความจาก PDF โดยจะมีการสร้าง instance ของ PDFExtractor และเรียกใช้ฟังก์ชัน extract เพื่อสกัดข้อความจากไฟล์ PDF ที่ถูกบันทึกไว้ใน temp_path ซึ่งฟังก์ชันนี้จะพยายามใช้การสกัดข้อความแบบปกติก่อน ถ้าไม่สำเร็จหรือข้อความไม่ดีพอ จะใช้ OCR แทน และจะคืนผลลัพธ์เป็นข้อความที่สกัดได้พร้อมกับข้อมูลเมตาเกี่ยวกับกระบวนการสกัด เช่น จำนวนหน้า วิธีการสกัดที่ใช้ และเวลาที่ใช้ในการประมวลผล เพื่อให้สามารถนำข้อมูลเหล่านี้ไปใช้ในการวิเคราะห์หรือแสดงผลต่อไปได้อย่างมีประสิทธิภาพ
         extractor = PDFExtractor()
         result = extractor.extract(temp_path)
         
-        # Calculate processing time
+        # ขั้นที่ 4 คำนวณเวลาที่ใช้ในการประมวลผลและสร้าง response โดยจะคำนวณเวลาที่ใช้ในการประมวลผลโดยการนำเวลาปัจจุบันมาลบกับเวลาที่เริ่มต้น และแปลงเป็นหน่วยมิลลิวินาที จากนั้นจะสร้าง response โดยใช้โมเดล ExtractionResponse ซึ่งจะประกอบด้วยข้อความที่สกัดได้ ข้อความจากแต่ละหน้า และข้อมูลเมตาเกี่ยวกับกระบวนการสกัด เช่น จำนวนหน้า วิธีการสกัดที่ใช้ และเวลาที่ใช้ในการประมวลผล เพื่อให้สามารถส่งข้อมูลเหล่านี้กลับไปยังผู้เรียกใช้งาน API ได้อย่างครบถ้วนและมีประสิทธิภาพ
         processing_time_ms = int((time.time() - start_time) * 1000)
-        
+        # บันทึกข้อมูลการประมวลผลลงใน log เพื่อให้สามารถติดตามและวิเคราะห์การทำงานของ API
         logger.info(
             f"Extraction completed: {result['page_count']} pages, "
             f"method={result['method']}, time={processing_time_ms}ms"
         )
-        
+        # คืนผลลัพธ์การสกัดข้อความพร้อมกับข้อมูลเมตาเกี่ยวกับกระบวนการสกัดในรูปแบบของโมเดล ExtractionResponse
         return ExtractionResponse(
             text=result["text"],
             pages=result["pages"],
@@ -90,7 +91,7 @@ async def extract_pdf(
                 "processing_time_ms": processing_time_ms
             }
         )
-        
+        # จัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการประมวลผล เช่น การตรวจสอบขนาดของไฟล์ การตรวจสอบประเภทของไฟล์
     except HTTPException:
         raise
     except Exception as e:
@@ -100,11 +101,11 @@ async def extract_pdf(
             detail=f"Extraction failed: {str(e)}"
         )
     finally:
-        # Cleanup temp file
+        # ขั้นที่ 5 ลบไฟล์ชั่วคราวหลังจากใช้งานเสร็จแล้ว 
         if temp_path:
             cleanup_temp_file(temp_path)
 
-
+# ใช้ “เฉพาะ LLM” (รับ text input มาแล้วส่งไป structuring Json)
 @router.post(
     "/llm/structure",
     response_model=StructureResponse,
@@ -120,6 +121,7 @@ async def extract_pdf(
                 "Returns validated JSON following the PO schema. "
                 "Requires X-API-Token header for authentication."
 )
+# ใช้ “เฉพาะ LLM” (รับ text input มาแล้วส่งไป structuring Json) โดยจะมีการรับข้อความดิบที่ต้องการนำไปสกัดข้อมูลในรูปแบบ JSON ผ่านทาง request body และจะมีการตรวจสอบ API token เพื่อความปลอดภัย จากนั้นจะมีการเรียกใช้บริการ OpenRouter.ai LLM เพื่อทำการสกัดข้อมูลจากข้อความดิบและแปลงเป็น JSON ตาม schema ที่กำหนดไว้ โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการเรียกใช้ LLM เช่น การจัดการกับข้อผิดพลาดในการเชื่อมต่อหรือข้อผิดพลาดที่เกิดจาก LLM เอง และจะมีการตรวจสอบความถูกต้องของ JSON ที่ได้รับจาก LLM ว่าตรงตาม schema ที่กำหนดไว้หรือไม่ เพื่อให้แน่ใจว่าข้อมูลที่ส่งกลับไปยังผู้เรียกใช้งาน API มีความถูกต้องและสามารถนำไปใช้งานต่อได้อย่างมีประสิทธิภาพ
 async def structure_text(request: StructureRequest, token: str = Depends(verify_token)):
     """
     Structure raw text into JSON using OpenRouter.ai LLM.
@@ -129,22 +131,23 @@ async def structure_text(request: StructureRequest, token: str = Depends(verify_
     
     Returns structured PO data following defined schema.
     """
+    # บันทึกเวลาที่เริ่มต้นการประมวลผลเพื่อใช้ในการคำนวณเวลาที่ใช้ในการประมวลผลทั้งหมดของฟังก์ชันนี้
     start_time = time.time()
-    
+    # จัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการประมวลผล เช่น การตรวจสอบความถูกต้องของ JSON ที่ได้รับจาก LLM ว่าตรงตาม schema ที่กำหนดไว้หรือไม่ และการจัดการกับข้อผิดพลาดในการเรียกใช้ LLM เพื่อให้แน่ใจว่าข้อมูลที่ส่งกลับไปยังผู้เรียกใช้งาน API มีความถูกต้องและสามารถนำไปใช้งานต่อได้อย่างมีประสิทธิภาพ
     try:
-        # Initialize services
+        # สร้าง instance ของ OpenRouterClient และ TextStructurer เพื่อใช้ในการเรียกใช้บริการ OpenRouter.ai LLM
         openrouter = OpenRouterClient()
         structurer = TextStructurer()
         
-        # Build prompt
+        # สร้าง prompt สำหรับ LLM โดยใช้ฟังก์ชัน build_prompt ของ TextStructurer
         messages = structurer.build_prompt(request.text)
         
-        # Call OpenRouter
+        # เรียกใช้บริการ OpenRouter.ai LLM เพื่อทำการสกัดข้อมูลจากข้อความดิบและแปลงเป็น JSON ตาม schema
         logger.info("Calling OpenRouter API for text structuring")
         try:
             raw_response = openrouter.call_openrouter(
                 messages=messages,
-                temperature=0.0  # Deterministic output
+                temperature=0.0  # พารามิเตอร์ที่ควบคุม “ความสุ่ม/ความสร้างสรรค์” ของคำตอบจากโมเดลภาษา (LLM)ต่ำ = ตอบนิ่งสูง = ตอบหลากหลาย สุ่มมากขึ้น เดาได้ ใช้ temperature 0.0 เพื่อให้ได้ผลลัพธ์ที่คาดเดาได้และสอดคล้องกับ schema
             )
         except httpx.HTTPStatusError as e:
             error_detail = str(e)
@@ -168,7 +171,7 @@ async def structure_text(request: StructureRequest, token: str = Depends(verify_
                 detail=f"Failed to call LLM service: {str(e)}"
             )
         
-        # Parse and validate response
+        # ตรวจสอบความถูกต้องของ JSON ที่ได้รับจาก LLM ว่าตรงตาม schema ที่กำหนดไว้หรือไม่ โดยใช้ฟังก์ชัน parse_and_validate
         try:
             structured_data = structurer.parse_and_validate(
                 raw_response,
@@ -207,7 +210,7 @@ async def structure_text(request: StructureRequest, token: str = Depends(verify_
             detail=f"Text structuring failed: {str(e)}"
         )
 
-
+# ใช้ “ครบจบในที่เดียว” (รับ PDF มาแล้วส่งกลับ structured Json)
 @router.post(
     "/pdf/to-structured-json",
     response_model=PDFToStructuredResponse,
@@ -224,6 +227,7 @@ async def structure_text(request: StructureRequest, token: str = Depends(verify_
                 "This is the complete pipeline: PDF -> OCR -> LLM -> Structured JSON. "
                 "Requires X-API-Token header for authentication."
 )
+# ใช้ “ครบจบในที่เดียว” (รับ PDF มาแล้วส่งกลับ structured Json) 
 async def pdf_to_structured_json(
     file: UploadFile = File(..., description="PDF file to process"),
     include_raw_text: bool = True,
@@ -241,7 +245,7 @@ async def pdf_to_structured_json(
     temp_path = None
     
     try:
-        # Step 1: Read and validate file
+        # Step 1: อ่านและตรวจสอบไฟล์ที่อัปโหลดเข้ามา โดยจะมีการตรวจสอบขนาดของไฟล์เพื่อให้แน่ใจว่าไม่เกินขนาดที่กำหนดไว้ และจะมีการตรวจสอบว่าไฟล์ที่อัปโหลดเป็น PDF หรือไม่ 
         content = await file.read()
         file_size = len(content)
         
@@ -252,11 +256,12 @@ async def pdf_to_structured_json(
             )
         
         validate_pdf_file(file.filename, file.content_type)
+        # ต้องบันทึกไฟล์ชั่วคราว (temp file) เพราะ “ไลบรารีที่ใช้มันต้องการ path ของไฟล์จริงบน disk” ไม่ใช่ bytes ใน memory
         temp_path = save_temp_file(content, suffix=".pdf")
         
         logger.info(f"Processing PDF to structured JSON: {file.filename} ({file_size / 1024:.2f} KB)")
         
-        # Step 2: Extract text from PDF
+        # Step 2: สกัดข้อความจาก PDF โดยจะมีการสร้าง instance ของ PDFExtractor และเรียกใช้ฟังก์ชัน extract
         extractor = PDFExtractor()
         ocr_result = extractor.extract(temp_path)
         extracted_text = ocr_result["text"]
@@ -272,14 +277,15 @@ async def pdf_to_structured_json(
                 detail="Extracted text is too short or empty. Please provide a valid document."
             )
         
-        # Step 3: Initialize LLM services
+        # Step 3: เรียกใช้บริการ OpenRouter.ai LLM เพื่อทำการสกัดข้อมูลจากข้อความดิบและแปลงเป็น JSON ตาม schema
         openrouter = OpenRouterClient()
         structurer = TextStructurer()
         
-        # Step 4: Build prompt and call LLM
+        # Step 4: สร้าง prompt สำหรับ LLM โดยใช้ฟังก์ชัน build_prompt ของ TextStructurer
         messages = structurer.build_prompt(extracted_text)
         
         logger.info("Calling OpenRouter API for structuring")
+        # จัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการเรียกใช้ LLM เช่น การจัดการกับข้อผิดพลาดในการเชื่อมต่อหรือข้อผิดพลาดที่เกิดจาก LLM เอง
         try:
             raw_response = openrouter.call_openrouter(
                 messages=messages,
@@ -307,14 +313,14 @@ async def pdf_to_structured_json(
                 detail=f"Failed to call LLM service: {str(e)}"
             )
         
-        # Step 5: Parse and validate
+        # Step 5: ตรวจสอบความถูกต้องของ JSON ที่ได้รับจาก LLM ว่าตรงตาม schema ที่กำหนดไว้หรือไม่ โดยใช้ฟังก์ชัน parse_and_validate และจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการตรวจสอบความถูกต้องของ JSON ที่ได้รับจาก LLM ว่าตรงตาม schema ที่กำหนดไว้หรือไม่ และการจัดการกับข้อผิดพลาดในการเรียกใช้ LLM เพื่อให้แน่ใจว่าข้อมูลที่ส่งกลับไปยังผู้เรียกใช้งาน API มีความถูกต้องและสามารถนำไปใช้งานต่อได้อย่างมีประสิทธิภาพ
         try:
             structured_data = structurer.parse_and_validate(
                 raw_response,
                 include_raw_text=include_raw_text
             )
             
-            # If include_raw_text is True and it wasn't set by LLM, add it
+            # ถ้า include_raw_text เป็น True แต่ไม่มี rawText ใน meta ของ structured_data ให้เพิ่ม rawText เข้าไปใน meta ด้วยข้อความที่สกัดได้จาก OCR เพื่อให้แน่ใจว่าข้อมูลที่ส่งกลับไปยังผู้เรียกใช้งาน API มีความครบถ้วนและสามารถนำไปใช้งานต่อได้อย่างมีประสิทธิภาพ
             if include_raw_text and not structured_data.get("meta", {}).get("rawText"):
                 if "meta" not in structured_data:
                     structured_data["meta"] = {}
@@ -332,11 +338,11 @@ async def pdf_to_structured_json(
                 status_code=422,
                 detail=f"LLM response doesn't match schema: {e.errors()}"
             )
-        
+        # คำนวณเวลาที่ใช้ในการประมวลผลทั้งหมดของฟังก์ชันนี้โดยการนำเวลาปัจจุบันมาลบกับเวลาที่เริ่มต้น และแปลงเป็นหน่วยมิลลิวินาที จากนั้นจะสร้าง response โดยใช้โมเดล PDFToStructuredResponse ซึ่งจะประกอบด้วยข้อมูลเมตาเกี่ยวกับกระบวนการสกัดข้อความจาก PDF เช่น จำนวนหน้า วิธีการสกัดที่ใช้ และความยาวของข้อความที่สกัดได้ พร้อมกับข้อมูลที่ถูกสกัดและจัดโครงสร้างในรูปแบบ JSON ตาม schema 
         processing_time_ms = int((time.time() - start_time) * 1000)
         
         logger.info(f"Complete pipeline finished in {processing_time_ms}ms")
-        
+        # คืนผลลัพธ์การสกัดข้อความพร้อมกับข้อมูลเมตาเกี่ยวกับกระบวนการสกัดในรูปแบบของโมเดล PDFToStructuredResponse
         return PDFToStructuredResponse(
             ocr={
                 "page_count": ocr_result["page_count"],

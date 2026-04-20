@@ -5,12 +5,12 @@ import os
 from fastapi import Header, HTTPException, status
 from typing import Optional
 
-
+# ใช้สำหรับการตรวจสอบ API token ใน header ของคำขอ โดยจะมีฟังก์ชันหลักที่ใช้ในการดึง token จาก environment variable และฟังก์ชันที่ใช้ในการตรวจสอบ token ที่ได้รับจาก header ว่าตรงกับ token ที่คาดหวังหรือไม่ โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการตรวจสอบ token เช่น การขาด token หรือ token ที่ไม่ถูกต้อง เพื่อให้แน่ใจว่าการเข้าถึง API ถูกจำกัดเฉพาะผู้ที่มี token ที่ถูกต้องเท่านั้น
 def get_api_token() -> Optional[str]:
     """Get API token from environment variable."""
     return os.getenv("API_TOKEN")
 
-
+# ใช้สำหรับการตรวจสอบ API token ใน header ของคำขอ โดยจะมีฟังก์ชันหลักที่ใช้ในการดึง token จาก environment variable และฟังก์ชันที่ใช้ในการตรวจสอบ token ที่ได้รับจาก header ว่าตรงกับ token ที่คาดหวังหรือไม่ โดยจะมีการจัดการกับข้อผิดพลาดที่อาจเกิดขึ้นในการตรวจสอบ token เช่น การขาด token หรือ token ที่ไม่ถูกต้อง เพื่อให้แน่ใจว่าการเข้าถึง API ถูกจำกัดเฉพาะผู้ที่มี token ที่ถูกต้องเท่านั้น
 async def verify_token(x_api_token: str = Header(..., description="API authentication token")):
     """
     Verify API token from request header.
