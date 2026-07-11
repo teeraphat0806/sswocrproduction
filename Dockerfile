@@ -18,6 +18,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download EasyOCR models (Thai and English) to cache them in the Docker image
+RUN python -c "import easyocr; easyocr.Reader(['th', 'en'], gpu=False)"
+
 # Copy application code
 COPY . .
 

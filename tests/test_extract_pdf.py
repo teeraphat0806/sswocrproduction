@@ -1,10 +1,19 @@
 import pytest
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi.testclient import TestClient
 from app.main import app
 from io import BytesIO
 from pypdf import PdfWriter
+
 # สร้าง TestClient สำหรับทดสอบ API
 client = TestClient(app)
+
+# ดึง token และกำหนด headers สำหรับเรียก API
+API_TOKEN = os.getenv("API_TOKEN", "my-secret-token-12345")
+HEADERS = {"X-API-Token": API_TOKEN}
 
 # ฟังก์ชันช่วยสร้าง PDF เปล่าขนาดเล็กสำหรับการทดสอบ
 def create_dummy_pdf() -> BytesIO:
@@ -41,7 +50,7 @@ def test_extract_pdf_no_file():
 def test_extract_pdf_invalid_extension():
     """Test extraction with invalid file extension."""
     files = {"file": ("test.txt", b"fake content", "text/plain")}
-    response = client.post("/extract/pdf", files=files)
+    response = client.post("/extract/pdf", files=files, headers=HEADERS)
     assert response.status_code == 400
     assert "Invalid file extension" in response.json()["detail"]
 
@@ -51,7 +60,7 @@ def test_extract_pdf_file_too_large():
     # Create a large fake PDF (21 MB)
     large_content = b"x" * (21 * 1024 * 1024)
     files = {"file": ("large.pdf", large_content, "application/pdf")}
-    response = client.post("/extract/pdf", files=files)
+    response = client.post("/extract/pdf", files=files, headers=HEADERS)
     assert response.status_code == 413
     assert "exceeds maximum allowed size" in response.json()["detail"]
 
@@ -61,7 +70,7 @@ def test_extract_pdf_valid_dummy():
     pdf_content = create_dummy_pdf()
     files = {"file": ("test.pdf", pdf_content, "application/pdf")}
     
-    response = client.post("/extract/pdf", files=files)
+    response = client.post("/extract/pdf", files=files, headers=HEADERS)
     
     # Should succeed (even if empty text)
     assert response.status_code == 200
@@ -80,7 +89,7 @@ def test_extract_pdf_response_structure():
     pdf_content = create_dummy_pdf()
     files = {"file": ("test.pdf", pdf_content, "application/pdf")}
     
-    response = client.post("/extract/pdf", files=files)
+    response = client.post("/extract/pdf", files=files, headers=HEADERS)
     
     assert response.status_code == 200
     data = response.json()

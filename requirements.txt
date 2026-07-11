@@ -9,7 +9,9 @@ PyMuPDF>=1.24.14
 httpx>=0.28.0
 python-dotenv>=1.0.1
 
+# Local Deep Learning OCR & Image Preprocessing
+opencv-python-headless>=4.8.0
+easyocr>=1.7.1
+
 # Testing
 pytest>=8.0.0
-
-# Optional: For better performance

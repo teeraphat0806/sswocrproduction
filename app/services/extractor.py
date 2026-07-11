@@ -2,10 +2,12 @@ import os
 import logging
 from typing import Dict, List
 import pypdf
-import pytesseract
 from PIL import Image
 import fitz  # PyMuPDF
 import io
+import cv2
+import numpy as np
+import easyocr
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,91 @@ class PDFExtractor:
     def __init__(self):
         self.min_text_length = 10  # Minimum text length to consider valid
         self.thai_ratio_threshold = 0.1  # Minimum ratio of Thai characters
+        self.reader = None  # Lazy load EasyOCR reader
+        
+    def _get_ocr_reader(self):
+        if self.reader is None:
+            logger.info("Initializing EasyOCR reader (Thai + English)...")
+            self.reader = easyocr.Reader(['th', 'en'], gpu=False)
+        return self.reader
+
+    def _preprocess_image(self, img_pil: Image.Image) -> np.ndarray:
+        """
+        Preprocess image to improve OCR accuracy.
+        - Grayscale conversion for Deep Learning OCR
+        """
+        img_np = np.array(img_pil)
+        if len(img_np.shape) == 3:
+            gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img_np
+        return gray
+
+    def _reconstruct_text_layout(self, ocr_results) -> str:
+        """
+        Reconstruct text layout from EasyOCR results to preserve tabular structure.
+        Groups text boxes on the same horizontal line and sorts them from left to right.
+        """
+        if not ocr_results:
+            return ""
+            
+        items = []
+        for bbox, text, conf in ocr_results:
+            if not text or not text.strip():
+                continue
+            x_coords = [p[0] for p in bbox]
+            y_coords = [p[1] for p in bbox]
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            height = y_max - y_min
+            center_y = y_min + height / 2
+            
+            items.append({
+                "text": text,
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+                "height": height,
+                "center_y": center_y
+            })
+            
+        if not items:
+            return ""
+            
+        # Group items into lines
+        lines = []
+        items.sort(key=lambda x: x["center_y"])
+        
+        while items:
+            current_item = items.pop(0)
+            line = [current_item]
+            remaining_items = []
+            tolerance = current_item["height"] * 0.4
+            
+            for item in items:
+                y_overlap = min(current_item["y_max"], item["y_max"]) - max(current_item["y_min"], item["y_min"])
+                min_height = min(current_item["height"], item["height"])
+                
+                if y_overlap > 0.4 * min_height or abs(item["center_y"] - current_item["center_y"]) < tolerance:
+                    line.append(item)
+                else:
+                    remaining_items.append(item)
+            
+            line.sort(key=lambda x: x["x_min"])
+            lines.append(line)
+            items = remaining_items
+            
+        # Sort lines by their average Y coordinate (top to bottom)
+        lines.sort(key=lambda l: sum(item["center_y"] for item in l) / len(l))
+        
+        # Build text output
+        output_lines = []
+        for line in lines:
+            line_str = "  ".join(item["text"] for item in line)
+            output_lines.append(line_str)
+            
+        return "\n".join(output_lines)
     
     # ฟังก์ชันหลักที่เรียกใช้ในการสกัดข้อความจาก PDF โดยจะพยายามใช้การสกัดข้อความแบบปกติก่อน ถ้าไม่สำเร็จหรือข้อความไม่ดีพอ จะใช้ OCR แทน
     def extract(self, pdf_path: str) -> Dict:
@@ -103,7 +190,7 @@ class PDFExtractor:
     #pytesseract → อ่านข้อความจากรูปภาพ โดยใช้ Tesseract OCR ซึ่งรองรับภาษาไทยและภาษาอังกฤษ
     def _extract_with_ocr(self, pdf_path: str) -> Dict:
         """
-        Extract text using OCR with Tesseract (Thai language).
+        Extract text using OCR with EasyOCR (Thai and English).
         
         Args:
             pdf_path: Path to PDF file
@@ -117,40 +204,40 @@ class PDFExtractor:
             page_count = len(doc)
             pages = []
             
-            # Configure Tesseract for Thai
-            # psm 3 = Fully automatic page segmentation (default)
-            # oem 3 = Default, based on what is available (LSTM if available)
-            custom_config = r'--oem 3 --psm 3'
+            # Configure resolution from env (default 300 DPI for high accuracy)
+            try:
+                dpi = int(os.getenv("OCR_DPI", "300"))
+            except ValueError:
+                dpi = 300
+            zoom = dpi / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            
+            # Get the EasyOCR reader
+            reader = self._get_ocr_reader()
             
             for page_num in range(page_count):
                 page = doc[page_num]
                 
-                # Render page to image
-                # Use higher DPI for better OCR accuracy
-                zoom = 2.0  # 2x zoom = 144 DPI (default is 72 DPI)
-                mat = fitz.Matrix(zoom, zoom)
+                # Render page to image at high DPI
                 pix = page.get_pixmap(matrix=mat)
                 
                 # Convert to PIL Image
                 img_data = pix.tobytes("png")
                 img = Image.open(io.BytesIO(img_data))
                 
-                # Run OCR with Thai language
+                # Preprocess image using OpenCV
+                processed_img = self._preprocess_image(img)
+                
+                # Run OCR with EasyOCR
                 try:
-                    text = pytesseract.image_to_string(
-                        img,
-                        lang='tha+eng',  # Thai + English
-                        config=custom_config
-                    )
-                except pytesseract.TesseractNotFoundError:
-                    logger.error("Tesseract not found. Please install Tesseract OCR.")
-                    raise Exception(
-                        "Tesseract OCR is not installed. "
-                        "Please install Tesseract and Thai language data (tha)."
-                    )
+                    ocr_results = reader.readtext(processed_img)
+                    text = self._reconstruct_text_layout(ocr_results)
+                except Exception as e:
+                    logger.error(f"EasyOCR error: {e}")
+                    raise Exception(f"Failed to run EasyOCR: {str(e)}")
                 
                 pages.append(text if text else "")
-                logger.debug(f"OCR completed for page {page_num + 1}/{page_count}")
+                logger.info(f"OCR completed for page {page_num + 1}/{page_count}")
             
             doc.close()
             

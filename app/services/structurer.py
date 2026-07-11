@@ -88,6 +88,8 @@ CRITICAL RULES:
    - "line" = bars/beams/rods with 2 dimensions OR has Ø symbol
 9. Assign confidence scores (0.0-1.0) based on how clear the data is
 10. Include warnings array if data is ambiguous or missing
+11. If the dimensions are listed in separate columns under headers like T (thickness), W (width), L (length), map them to thickness, width, and length respectively. For example, 'SS400  19  475  545  1 PCS' maps to thickness=19, width=475, length=545, quantity=1, shape='square'.
+12. Customer name can often be found at the very top of the document (e.g., top-left header), while our company (S.S.W.) is listed under 'เรียน' (Attention) or 'ชื่อ' as the recipient/seller. Always extract the other company name (the buyer, e.g., 'บริษัท เอ็ม.ซี.รุ่งเจริญ สตีลเพลท จำกัด') as customer.name.
 
 IMPORTANT - COMPANY NAME EXCLUSION:
 DO NOT use these company names as customer name (these are OUR company, not the customer):
