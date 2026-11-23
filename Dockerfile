@@ -15,8 +15,9 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install CPU-only PyTorch first (reduces image size and avoids unused CUDA libs), then project dependencies
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Pre-download EasyOCR models (Thai and English) to cache them in the Docker image
 RUN python -c "import easyocr; easyocr.Reader(['th', 'en'], gpu=False)"

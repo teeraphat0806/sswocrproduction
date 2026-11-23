@@ -7,9 +7,14 @@ from app.models.po_schemas import (
 from app.services.extractor import PDFExtractor
 from app.services.openrouter_client import OpenRouterClient
 from app.services.structurer import TextStructurer
-from app.utils.files import validate_pdf_file, save_temp_file, cleanup_temp_file
+from app.utils.files import (
+    validate_pdf_file,
+    save_upload_file_streaming,
+    cleanup_temp_file,
+)
 from app.utils.auth import verify_token
 from pydantic import ValidationError
+import asyncio
 import logging
 import time
 import httpx
@@ -20,6 +25,10 @@ router = APIRouter()
 
 # Configuration
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
+# Shared singleton extractor and concurrency limiter to avoid reloading EasyOCR or spiking peak RAM
+pdf_extractor = PDFExtractor()
+ocr_semaphore = asyncio.Semaphore(1)
 # ไฟล์นี้คือ “API Layer (FastAPI Router)” ของระบบทั้งหมดคือ “ประตูเข้า” ของระบบ OCR + LLM ทั้งก้อน
 # ดึง text จาก PDF
 @router.post(
@@ -52,27 +61,16 @@ async def extract_pdf(
     temp_path = None
     
     try:
-        # ขั้นที่ 1 อ่านและตรวจสอบไฟล์ที่อัปโหลดเข้ามา โดยจะมีการตรวจสอบขนาดของไฟล์เพื่อให้แน่ใจว่าไม่เกินขนาดที่กำหนดไว้ และจะมีการตรวจสอบว่าไฟล์ที่อัปโหลดเป็น PDF หรือไม่ โดยใช้ฟังก์ชัน validate_pdf_file ที่ได้กำหนดไว้ใน utils/files.py ซึ่งจะตรวจสอบทั้งนามสกุลของไฟล์และประเภทของเนื้อหา (content type) เพื่อให้แน่ใจว่าไฟล์ที่ได้รับเป็น PDF ที่ถูกต้องและปลอดภัยสำหรับการประมวลผลต่อไป
-        content = await file.read()
-        file_size = len(content)
-        
-        # ตรวจสอบขนาดไฟล์
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File size ({file_size / 1024 / 1024:.2f} MB) exceeds maximum allowed size (20 MB)"
-            )
-        
-        # ตรวจสอบว่าเป็น PDF 
+        # ขั้นที่ 1 ตรวจสอบว่าเป็น PDF และสตรีมไฟล์ลงดิสก์ทีละ chunk พร้อมจำกัดขนาดไฟล์เพื่อไม่ให้กิน RAM
         validate_pdf_file(file.filename, file.content_type)
-        
-        # ขั้นที่ 2 บันทึกไฟล์ชั่วคราวในระบบเพื่อนำไปสกัดข้อความจาก PDF
-        temp_path = save_temp_file(content, suffix=".pdf")
+        temp_path, file_size = await save_upload_file_streaming(
+            file, MAX_FILE_SIZE, suffix=".pdf"
+        )
         logger.info(f"Processing PDF: {file.filename} ({file_size / 1024:.2f} KB)")
         
-        # ขั้นที่ 3 สกัดข้อความจาก PDF โดยจะมีการสร้าง instance ของ PDFExtractor และเรียกใช้ฟังก์ชัน extract เพื่อสกัดข้อความจากไฟล์ PDF ที่ถูกบันทึกไว้ใน temp_path ซึ่งฟังก์ชันนี้จะพยายามใช้การสกัดข้อความแบบปกติก่อน ถ้าไม่สำเร็จหรือข้อความไม่ดีพอ จะใช้ OCR แทน และจะคืนผลลัพธ์เป็นข้อความที่สกัดได้พร้อมกับข้อมูลเมตาเกี่ยวกับกระบวนการสกัด เช่น จำนวนหน้า วิธีการสกัดที่ใช้ และเวลาที่ใช้ในการประมวลผล เพื่อให้สามารถนำข้อมูลเหล่านี้ไปใช้ในการวิเคราะห์หรือแสดงผลต่อไปได้อย่างมีประสิทธิภาพ
-        extractor = PDFExtractor()
-        result = extractor.extract(temp_path)
+        # ขั้นที่ 2 สกัดข้อความจาก PDF โดยใช้ shared PDFExtractor และจำกัด concurrency ผ่าน semaphore
+        async with ocr_semaphore:
+            result = await asyncio.to_thread(pdf_extractor.extract, temp_path)
         
         # ขั้นที่ 4 คำนวณเวลาที่ใช้ในการประมวลผลและสร้าง response โดยจะคำนวณเวลาที่ใช้ในการประมวลผลโดยการนำเวลาปัจจุบันมาลบกับเวลาที่เริ่มต้น และแปลงเป็นหน่วยมิลลิวินาที จากนั้นจะสร้าง response โดยใช้โมเดล ExtractionResponse ซึ่งจะประกอบด้วยข้อความที่สกัดได้ ข้อความจากแต่ละหน้า และข้อมูลเมตาเกี่ยวกับกระบวนการสกัด เช่น จำนวนหน้า วิธีการสกัดที่ใช้ และเวลาที่ใช้ในการประมวลผล เพื่อให้สามารถส่งข้อมูลเหล่านี้กลับไปยังผู้เรียกใช้งาน API ได้อย่างครบถ้วนและมีประสิทธิภาพ
         processing_time_ms = int((time.time() - start_time) * 1000)
@@ -245,25 +243,17 @@ async def pdf_to_structured_json(
     temp_path = None
     
     try:
-        # Step 1: อ่านและตรวจสอบไฟล์ที่อัปโหลดเข้ามา โดยจะมีการตรวจสอบขนาดของไฟล์เพื่อให้แน่ใจว่าไม่เกินขนาดที่กำหนดไว้ และจะมีการตรวจสอบว่าไฟล์ที่อัปโหลดเป็น PDF หรือไม่ 
-        content = await file.read()
-        file_size = len(content)
-        
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File size ({file_size / 1024 / 1024:.2f} MB) exceeds maximum allowed size (20 MB)"
-            )
-        
+        # Step 1: ตรวจสอบว่าเป็น PDF และสตรีมไฟล์ลงดิสก์ทีละ chunk พร้อมจำกัดขนาดไฟล์
         validate_pdf_file(file.filename, file.content_type)
-        # ต้องบันทึกไฟล์ชั่วคราว (temp file) เพราะ “ไลบรารีที่ใช้มันต้องการ path ของไฟล์จริงบน disk” ไม่ใช่ bytes ใน memory
-        temp_path = save_temp_file(content, suffix=".pdf")
+        temp_path, file_size = await save_upload_file_streaming(
+            file, MAX_FILE_SIZE, suffix=".pdf"
+        )
         
         logger.info(f"Processing PDF to structured JSON: {file.filename} ({file_size / 1024:.2f} KB)")
         
-        # Step 2: สกัดข้อความจาก PDF โดยจะมีการสร้าง instance ของ PDFExtractor และเรียกใช้ฟังก์ชัน extract
-        extractor = PDFExtractor()
-        ocr_result = extractor.extract(temp_path)
+        # Step 2: สกัดข้อความจาก PDF โดยใช้ shared PDFExtractor และจำกัด concurrency ผ่าน semaphore
+        async with ocr_semaphore:
+            ocr_result = await asyncio.to_thread(pdf_extractor.extract, temp_path)
         extracted_text = ocr_result["text"]
         
         logger.info(

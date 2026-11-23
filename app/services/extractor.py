@@ -1,13 +1,11 @@
+import gc
 import os
 import logging
-from typing import Dict, List
+import threading
+from typing import Dict
 import pypdf
-from PIL import Image
 import fitz  # PyMuPDF
-import io
-import cv2
 import numpy as np
-import easyocr
 
 logger = logging.getLogger(__name__)
 
@@ -21,29 +19,30 @@ class PDFExtractor:
     PDF text extractor with Thai language support.
     Tries text extraction first, falls back to OCR for scanned PDFs.
     """
+
+    _shared_reader = None
+    _reader_lock = threading.Lock()
+    _ocr_lock = threading.Lock()
     
     def __init__(self):
         self.min_text_length = 10  # Minimum text length to consider valid
         self.thai_ratio_threshold = 0.1  # Minimum ratio of Thai characters
-        self.reader = None  # Lazy load EasyOCR reader
         
     def _get_ocr_reader(self):
-        if self.reader is None:
-            logger.info("Initializing EasyOCR reader (Thai + English)...")
-            self.reader = easyocr.Reader(['th', 'en'], gpu=False)
-        return self.reader
+        if PDFExtractor._shared_reader is None:
+            with PDFExtractor._reader_lock:
+                if PDFExtractor._shared_reader is None:
+                    import easyocr  # Lazy import to avoid loading PyTorch until OCR is actually needed
+                    logger.info("Initializing EasyOCR reader (Thai + English)...")
+                    PDFExtractor._shared_reader = easyocr.Reader(['th', 'en'], gpu=False)
+        return PDFExtractor._shared_reader
 
-    def _preprocess_image(self, img_pil: Image.Image) -> np.ndarray:
+    def _preprocess_image(self, img_pil) -> np.ndarray:
         """
-        Preprocess image to improve OCR accuracy.
-        - Grayscale conversion for Deep Learning OCR
+        Preprocess PIL image to grayscale numpy array for OCR.
+        Kept for compatibility; _extract_with_ocr renders grayscale directly via PyMuPDF.
         """
-        img_np = np.array(img_pil)
-        if len(img_np.shape) == 3:
-            gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = img_np
-        return gray
+        return np.array(img_pil.convert("L"))
 
     def _reconstruct_text_layout(self, ocr_results) -> str:
         """
@@ -198,51 +197,57 @@ class PDFExtractor:
         Returns:
             Dictionary with text, pages, and page_count
         """
+        # Configure resolution and canvas size from env to balance accuracy and RAM
         try:
-            # Open PDF with PyMuPDF
-            doc = fitz.open(pdf_path)
-            page_count = len(doc)
-            pages = []
-            
-            # Configure resolution from env (default 300 DPI for high accuracy)
-            try:
-                dpi = int(os.getenv("OCR_DPI", "300"))
-            except ValueError:
-                dpi = 300
-            zoom = dpi / 72.0
-            mat = fitz.Matrix(zoom, zoom)
-            
-            # Get the EasyOCR reader
-            reader = self._get_ocr_reader()
-            
-            for page_num in range(page_count):
-                page = doc[page_num]
-                
-                # Render page to image at high DPI
-                pix = page.get_pixmap(matrix=mat)
-                
-                # Convert to PIL Image
-                img_data = pix.tobytes("png")
-                img = Image.open(io.BytesIO(img_data))
-                
-                # Preprocess image using OpenCV
-                processed_img = self._preprocess_image(img)
-                
-                # Run OCR with EasyOCR
-                try:
-                    ocr_results = reader.readtext(processed_img)
-                    text = self._reconstruct_text_layout(ocr_results)
-                except Exception as e:
-                    logger.error(f"EasyOCR error: {e}")
-                    raise Exception(f"Failed to run EasyOCR: {str(e)}")
-                
-                pages.append(text if text else "")
-                logger.info(f"OCR completed for page {page_num + 1}/{page_count}")
-            
-            doc.close()
-            
+            dpi = int(os.getenv("OCR_DPI", "200"))
+        except ValueError:
+            dpi = 200
+
+        try:
+            canvas_size = int(os.getenv("OCR_CANVAS_SIZE", "1280"))
+        except ValueError:
+            canvas_size = 1280
+
+        zoom = dpi / 72.0
+        mat = fitz.Matrix(zoom, zoom)
+
+        # Get shared EasyOCR reader (lazy-loaded singleton)
+        reader = self._get_ocr_reader()
+        pages = []
+
+        try:
+            with fitz.open(pdf_path) as doc:
+                page_count = len(doc)
+
+                for page_num in range(page_count):
+                    page = doc[page_num]
+
+                    # Render page directly to grayscale pixmap and convert to numpy without PNG/PIL/OpenCV copies
+                    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY, alpha=False)
+                    processed_img = np.frombuffer(
+                        pix.samples, dtype=np.uint8
+                    ).reshape(pix.height, pix.width).copy()
+                    del pix
+
+                    # Run OCR with EasyOCR (serialized via lock to prevent concurrent peak RAM spikes)
+                    try:
+                        with PDFExtractor._ocr_lock:
+                            ocr_results = reader.readtext(
+                                processed_img,
+                                canvas_size=canvas_size,
+                            )
+                        text = self._reconstruct_text_layout(ocr_results)
+                    except Exception as e:
+                        logger.error(f"EasyOCR error: {e}")
+                        raise Exception(f"Failed to run EasyOCR: {str(e)}")
+                    finally:
+                        del processed_img
+
+                    pages.append(text if text else "")
+                    logger.info(f"OCR completed for page {page_num + 1}/{page_count}")
+
             combined_text = "\n\n".join(pages)
-            
+
             return {
                 "text": combined_text,
                 "pages": pages,
@@ -251,6 +256,8 @@ class PDFExtractor:
         except Exception as e:
             logger.error(f"OCR extraction failed: {e}")
             raise
+        finally:
+            gc.collect()
 
     # ใช้ตรวจว่า:“text ที่ได้จาก pypdf ดีพอหรือยัง” ถ้าไม่ดีพอ (เช่น มีแต่ตัวอักษรภาษาอังกฤษ หรือมีข้อความน้อยเกินไป) ก็จะไปใช้ OCR แทน
     def _is_valid_extraction(self, text: str) -> bool:
